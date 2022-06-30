@@ -3,16 +3,19 @@ var itds = itds || {};
 itds.accordion = (function() {
   let accordions, opts = {
     animationSpeed: 'fast',
+    animationTimingFunction: 'ease-in-out',
     closeOtherElementsOnOpen: true,
+    closeAllOtherElementsOnOpen: false,
     elementsOpenOnLoad: false,
     openById: false,
     openFirstElement: true,
+    openFirstElementPerAccordion: true,
     scrollOffset: 200,
     scrollToAccordion: false,
     accordionSelector: ".accordion",
     accordionToggleSelector: ".accordion-toggle",
     accordionContentSelector: ".accordion-content",
-    openClass: "open",
+    openClass: "active",
     closedClass: "collapsed",
     openByDefaultClass: "default",
     generateStyles: true,
@@ -21,27 +24,32 @@ itds.accordion = (function() {
 
   function autoInit() {
     delete itds.accordion.autoInit;
-    setTimeout(() => !!itds.accordion.init && init(), 0);
+    setTimeout(() => itds && itds.accordion && itds.accordion.init && itds.accordion.init());
   }
 
   function init(options = {}) {
-    accordions = document.querySelectorAll(opts.accordionSelector);
-    if(!accordions.length) return;
+    delete itds.accordion.init;
 
     opts = {...opts, ...options};
     opts.animationSpeed = opts.animationSpeed === "fast" ? 250 : opts.animationSpeed === "medium" ? 350 : opts.animationSpeed === "slow" ? 500 : 250;
-    if (opts.closeOtherElementsOnOpen && opts.elementsOpenOnLoad) opts.closeOtherElementsOnOpen = false
+    if (opts.closeAllOtherElementsOnOpen && !opts.closeOtherElementsOnOpen) opts.closeOtherElementsOnOpen = true;
+    if (opts.closeOtherElementsOnOpen && opts.elementsOpenOnLoad) opts.closeOtherElementsOnOpen = false;
+    if (!opts.openFirstElement) opts.openFirstElementPerAccordion = false;
 
-    accordions?.forEach(e => {
+    accordions = document.querySelectorAll(opts.accordionSelector);
+    if(!accordions.length) return;
+
+    accordions.forEach((e, ei) => {
       let toggles = e.querySelectorAll(opts.accordionToggleSelector);
 
-      toggles?.forEach((toggle, i) => {
+      toggles.length && toggles.forEach((toggle, i) => {
         toggle.addEventListener("click", onAccordionClicked);
         toggle.parentAccordion = e;
 
-        toggle.nextElementSibling.originalHeight = toggle.nextElementSibling.getBoundingClientRect().height + "px";
-        if ((i === 0 && !opts.elementsOpenOnLoad && opts.openFirstElement) || opts.elementsOpenOnLoad || toggle.classList.contains(opts.openByDefaultClass)) {
-          toggle.nextElementSibling.style.maxHeight = toggle.nextElementSibling.originalHeight;
+        if ((i === 0 && !opts.elementsOpenOnLoad && opts.openFirstElementPerAccordion)
+          || (i === 0 && ei === 0 && !opts.elementsOpenOnLoad && opts.openFirstElement)
+          || opts.elementsOpenOnLoad
+          || toggle.classList.contains(opts.openByDefaultClass)) {
           toggle.classList.add(opts.openClass);
         } else {
           toggle.nextElementSibling.style.maxHeight = "0px";
@@ -50,7 +58,7 @@ itds.accordion = (function() {
       });
 
       if (!opts.elementsOpenOnLoad && opts.openById) {
-        toggles?.forEach(toggle => {
+        toggles.length && toggles.forEach(toggle => {
           if ((toggle.dataset.id || toggle.id) === window.location.hash.substr(opts.anchorTogglePrefix.length + 1)){
             toggle.click();
             scrollToToggle(toggle, opts);
@@ -60,36 +68,58 @@ itds.accordion = (function() {
     });
 
     if (opts.generateStyles) {
-      let css = new CSSStyleSheet()
-      css.addRule("html", "scroll-behavior: smooth");
-      css.addRule(`${opts.accordionSelector} ${opts.accordionToggleSelector}`, "cursor: pointer");
-      css.addRule(`${opts.accordionSelector} ${opts.accordionToggleSelector}`, opts.scrollOffset === "center" ? "scroll-margin: 40vh" : `scroll-margin: ${opts.scrollOffset}px`);
-      css.addRule(`${opts.accordionSelector} ${opts.accordionToggleSelector} + ${opts.accordionContentSelector}`, "overflow: hidden");
-      css.addRule(`${opts.accordionSelector} ${opts.accordionToggleSelector} + ${opts.accordionContentSelector}`, `transition: max-height ${opts.animationSpeed}ms ease-in-out, padding ${opts.animationSpeed}ms ease-in-out`);
-      css.addRule(`${opts.accordionSelector} ${opts.accordionToggleSelector}.${opts.closedClass} + ${opts.accordionContentSelector}`, "padding-top: 0; padding-bottom: 0;");
-      document.adoptedStyleSheets = [...document.adoptedStyleSheets, css];
+      let styles = [
+        {
+          selector: "html",
+          value: "scroll-behavior: smooth"
+        },
+        {
+          selector: `${opts.accordionSelector} ${opts.accordionToggleSelector}`,
+          value: "cursor: pointer"
+        },
+        {
+          selector: `${opts.accordionSelector} ${opts.accordionToggleSelector}`,
+          value: opts.scrollOffset === "center" ? "scroll-margin: 40vh" : `scroll-margin: ${opts.scrollOffset}px`
+        },
+        {
+          selector: `${opts.accordionSelector} ${opts.accordionToggleSelector} + ${opts.accordionContentSelector}:not(.measurement)`,
+          value: `transition: max-height ${opts.animationSpeed}ms ${opts.animationTimingFunction}, padding ${opts.animationSpeed}ms ${opts.animationTimingFunction}; overflow: hidden`
+        },
+        {
+          selector: `${opts.accordionSelector} ${opts.accordionToggleSelector}.${opts.closedClass} + ${opts.accordionContentSelector}:not(.measurement)`,
+          value: "padding-top: 0; padding-bottom: 0;"
+        }
+      ];
+
+      try {
+        let css = new CSSStyleSheet()
+        styles.forEach(s => css.addRule(s.selector, s.value));
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, css];
+      } catch (e) {
+        let css = document.createElement("style");
+        styles.forEach(s => css.innerHTML+=`${s.selector} {${s.value}}\n`);
+        document.head.append(css);
+      }
     }
 
-    let handleResize = debounce(onResize, 50);
+    let handleResize = debounce(onResize, 100);
     window.addEventListener("resize", handleResize);
+    onResize();
   }
-
 
   function onAccordionClicked(ev) {
     let toggle = ev.currentTarget;
-    if (!toggle) return;
+    if (!(toggle && toggle.parentAccordion)) return;
 
     if (opts.closeOtherElementsOnOpen) {
-      let currentTarget = toggle.parentAccordion.querySelector(opts.accordionToggleSelector + "." + opts.openClass)
+      let currentTarget = (opts.closeAllOtherElementsOnOpen ? document : toggle.parentAccordion).querySelector(`${opts.accordionToggleSelector}.${opts.openClass}`)
       currentTarget !== toggle && onAccordionClicked({currentTarget});
     }
 
-    if (toggle.classList.contains(opts.openClass)){
-      toggle.classList.remove(opts.openClass);
+    if (!toggle.classList.toggle(opts.openClass)){
       toggle.classList.add(opts.closedClass);
       toggle.nextElementSibling.style.maxHeight = "0px";
-    } else if (toggle.classList.contains(opts.closedClass)) {
-      toggle.classList.remove(opts.closedClass);
+    } else if (!toggle.classList.toggle(opts.closedClass)) {
       toggle.classList.add(opts.openClass);
       toggle.nextElementSibling.style.maxHeight = toggle.nextElementSibling.originalHeight;
 
@@ -127,21 +157,19 @@ itds.accordion = (function() {
   function onResize(e) {
     accordions.forEach(e => {
       let toggles = e.querySelectorAll(opts.accordionToggleSelector);
-      toggles?.forEach((toggle, i) => {
+      toggles.length && toggles.forEach((toggle, i) => {
         let toggleContent = toggle.nextElementSibling, initialHeight = toggleContent.style.maxHeight, newHeight;
-
+        toggleContent.classList.toggle("measurement");
         toggleContent.style.maxHeight = "";
-        newHeight = toggleContent.getBoundingClientRect().height + "px";
+        newHeight = `${toggleContent.getBoundingClientRect().height+30}px`;
         toggleContent.originalHeight = newHeight;
         toggleContent.style.maxHeight = initialHeight === "0px" ? "0px" : newHeight ;
+        toggleContent.classList.toggle("measurement");
       });
     })
   }
 
-  return {
-    autoInit,
-    init,
-  };
+  return {autoInit, init};
 })();
 
 (function() {
